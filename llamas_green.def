@@ -1,0 +1,41 @@
+# 
+# System Parameters
+SPECTROGRAPH	LLAMAS_GREEN	
+RESOLUTION 	2200.0
+WAVE_MIN   	480.0		nm
+WAVE_MAX   	690.0   	nm
+F_COL      	200.0   	mm (collimator focal length)
+F_CAM		70.0		mm (camera focal length)
+FRATIO_COL	4.0		   (Focal ratio of collimator (monochromatic)
+FRATIO_CAM	1.28		   (Focal ratio of camera (monochromatic)
+BLADE_OBSCURE	0.90               Geometric obscuration from the slit mount
+D_BEAM		50.0		mm (Diameter of the collimated beam)
+GAIN		1.0		e/DN 
+#
+# Fiber Feed Parameters
+FIBER_THETA	0.75		arcsec pitch
+FIBER_DCORE	110		core diameter (microns)
+FIBER_FRD	0.05		throughphut loss from FRD
+FIBER_ELEM	MicroLens  2 FusedSilica ECI_FusedSilica.txt ECI model
+FIBER_ELEM	Fiber_AR   2 FusedSilica fiber_ar.txt ECI placeholder
+FIBER_ELEM	Internal   1 FusedSilica Polymicro_FBPI_8m.txt PolyMicro model
+#FIBER_ELEM	Internal   1 FusedSilica Fiber/fiber_interpolation_10302020.txt PolyMicro asbuilt
+#
+# Spectrograph Element Definitions
+ELEMENT 	Collimator 1 FusedSilica dielectric_mirror.txt ECI2 model
+ELEMENT		DichroicRG 1 FusedSilica ECI_FusedSilica.txt ECI model
+#ELEMENT		DichroicRG 1 FusedSilica Dichroic_SL/Actual_transmission_reflection(Witness_sample_coating_lot_A).txt ECI asbuilt
+ELEMENT		DichroicBG 1 FusedSilica ECI_FusedSilica.txt ECI model
+#GRATING		VPH_G  1200 420 0 wasach_llamas2200_green.txt Wasach model
+GRATING		VPH_G  1200 420 0 VPHG/vph_wasach_green_eavg.txt Wasach asbuilt
+ELEMENT		Prism	   1 FusedSilica ECI_FusedSilica.txt ECI model
+ELEMENT		L1 	   2 CaF2 	 ECI_FusedSilica.txt ECI placeholder
+ELEMENT		L2 	   2 BAL35Y 	 ECI_PBM8Y.txt 	     ECI placeholder
+ELEMENT		L3 	   2 CaF2 	 ECI_FusedSilica.txt ECI placeholder
+ELEMENT		L4 	   2 BSM51Y 	 ECI_PBM8Y.txt 	     ECI placeholder
+ELEMENT		L5 	   2 CaF2 	 ECI_FusedSilica.txt ECI placeholder
+ELEMENT		L6 	   2 PBM2Y 	 ECI_PBM8Y.txt 	     ECI placeholder
+ELEMENT		L7 	   2 SNBH52 	 ECI_PBM8Y.txt 	     ECI placeholder
+ELEMENT		WINDOW 	   2 Sapphire 	 ECI_FusedSilica.txt ECI placeholder
+SENSOR		CCD42-40_GREEN CCD42-40_green.txt 2.46 0.00119 13.5
+END
