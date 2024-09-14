@@ -1,0 +1,19 @@
+# Taken from Don Hall's ASTRO2010 white paper
+# Measured data from a substrate removed 1.7 um device at 145K
+#
+750.	75.
+800.	80.
+900.	84.
+1000.	88.
+1100.	88.
+1200.	89.
+1300.	88.
+1400.	88.
+1500.	89.
+1600.	88.
+1700.	78.
+1720.	63.
+1740.	30.
+1760.	8.0
+1780.	2.0
+1800.	0.0

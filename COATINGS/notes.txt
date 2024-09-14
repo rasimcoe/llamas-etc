@@ -1,0 +1,13 @@
+
+- Need good curves for the dichroics.  Both need to have high %T in the IR.
+
+- Assuming 98% T, as on Asahi webite but this is for a different
+  wideband IR dichroic.  Likewse 1% % out of band.
+
+- The sol-gel is taken from Cleveland Crystals website and is a stock
+  coating.  Some customization could help.
+
+
+
+
+
