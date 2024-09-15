@@ -13,7 +13,7 @@ There are a few items to remember when interpreting results from the exposure ti
 
 3) The ETC uses an average value for spectral R over the full instrument range and does not account for variations across the bandpass. This will be added in future releases.
 
-4) Once again, we remind users that this is a best-effort estimate based on multiplying the measured and model curves for optical glasses, coatings, mirrors, the fibers, and geometric shadows.  Users are urged to plan conservatively for early observing runs, until the team has an opportunity to observe spectro-photometric standard stars on the sky. When those observations are taken we will update the ETC gitib repository with as-measured throughputs so that future observers can forecast with confidence.
+4) Once again, we remind users that this is a best-effort estimate based on multiplying the measured and model curves for optical glasses, coatings, mirrors, the fibers, and geometric shadows.  Users are urged to plan conservatively for early observing runs, until the team has an opportunity to observe spectro-photometric standard stars on the sky. When those observations are taken we will update this repository with as-measured throughputs so that future observers can forecast with confidence.
 
 If you develop new functionality for the ETC and would like to share this with future users, please contact the site administrator to request developer access to submit a pull request. We encourage regular users to share these improvements with the rest of the community!
 
