@@ -10,6 +10,11 @@ def observe_spectrum(instrument, texp, input_wv, input_spec, skyfile="eso_newmoo
     if (os.path.isfile(skyfile)):
         full_path = skyfile
     else:
+        try:
+            coat_path = os.environ['COATINGS_PATH']
+        except:
+            os.environ['COATINGS_PATH'] = './COATINGS'
+        
         full_path = os.environ['COATINGS_PATH']+skyfile
     
     # ESO dark night sky spectrum is in weird units: photons/m2/s/micron/arcsec2
