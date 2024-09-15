@@ -13,6 +13,13 @@ class OpticalSurface:
         self.reflectance_tab  = np.array(0)
 
     def loadThroughputTab(self):
+
+        try:
+            coat_path = os.environ['COATINGS_PATH']
+        except:
+            os.environ['COATINGS_PATH'] = './COATINGS'
+            coat_path = os.environ['COATINGS_PATH']
+            
         if (os.path.isfile(self.coating_file)):
             coating_data = np.genfromtxt(self.coating_file,usecols=[0,1],
                                          dtype=None,names=['wv','throughput'])
