@@ -17,7 +17,7 @@ class OpticalSurface:
         try:
             coat_path = os.environ['COATINGS_PATH']
         except:
-            os.environ['COATINGS_PATH'] = './COATINGS'
+            os.environ['COATINGS_PATH'] = './COATINGS/'
             coat_path = os.environ['COATINGS_PATH']
             
         if (os.path.isfile(self.coating_file)):
