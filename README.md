@@ -24,6 +24,22 @@ it (this is handled automatically via `instrument.throughput_mode`). The as-meas
 based on the may 2026 standards (GD108, Feige110); the absolute scale is provisional pending a review of
 night-to-night transparency, but the wavelength shape is robust.
 
+### Airmass (atmospheric extinction)
+
+Both the measured and theoretical throughputs are referenced to **above the atmosphere**, so `observe_spectrum`
+applies atmospheric extinction for your observation's airmass:
+
+```python
+counts, noise = observe.observe_spectrum(llamas_green, texp, wave_nm, flux)               # airmass 1.0 (warns)
+counts, noise = observe.observe_spectrum(llamas_green, texp, wave_nm, flux, airmass=1.4)   # sec(z) = 1.4
+```
+
+If you don't pass `airmass` it **defaults to 1.0 (zenith) and prints a warning** — always pass your actual
+sec(z). Extinction uses the Las Campanas curve in `COATINGS/lco_extinction.txt` and is applied to the source
+as `10^(-0.4·k(λ)·airmass)` (strongest in the blue). The sky-background airglow is emitted high in the
+atmosphere and is not extincted like a source, so it is left unmodified (its mild airmass dependence is a
+future refinement).
+
 # Caveats
 
 There are a few items to remember when interpreting results from the exposure time calculator:
