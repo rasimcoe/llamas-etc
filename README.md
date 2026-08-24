@@ -3,6 +3,27 @@ Public exposure time calculator for the Magellan LLAMAS Integral Field Spectrogr
 
 Please review the supplied jupyter notebook LLAMAS_ETC_demo.ipynb for instructions on how to run the code.
 
+## Throughput: as-measured (default) vs. theoretical
+
+As of the first on-sky calibration, the ETC **defaults to the as-measured instrument throughput** derived
+from spectrophotometric standard-star observations (the telescope+instrument response, with atmospheric
+extinction removed). The pre-ship theoretical model (product of individual optical-element throughputs) is
+still fully available:
+
+```python
+llamas_green = spec.Spectrograph('LLAMAS_GREEN')
+llamas_green.build_model('llamas_green.def')                          # measured (default)
+llamas_green.build_model('llamas_green.def', throughput_mode='theoretical')   # pre-ship model
+```
+
+The measured curves live in `COATINGS/measured_throughput_{blue,green,red}.txt` (2 columns: wavelength [nm],
+throughput fraction). Where the measurement has no clean coverage — the channel edges and the broad red
+telluric H2O complex (~890–990 nm) — the ETC automatically falls back to the theoretical curve. In measured
+mode the telescope mirror reflectivity is already contained in the curve, so `observe.py` does not re-apply
+it (this is handled automatically via `instrument.throughput_mode`). The as-measured throughput is currently
+based on the may 2026 standards (GD108, Feige110); the absolute scale is provisional pending a review of
+night-to-night transparency, but the wavelength shape is robust.
+
 # Caveats
 
 There are a few items to remember when interpreting results from the exposure time calculator:
@@ -13,7 +34,13 @@ There are a few items to remember when interpreting results from the exposure ti
 
 3) The ETC uses an average value for spectral R over the full instrument range and does not account for variations across the bandpass. This will be added in future releases.
 
-4) Once again, we remind users that this is a best-effort estimate based on multiplying the measured and model curves for optical glasses, coatings, mirrors, the fibers, and geometric shadows.  Users are urged to plan conservatively for early observing runs, until the team has an opportunity to observe spectro-photometric standard stars on the sky. When those observations are taken we will update this repository with as-measured throughputs so that future observers can forecast with confidence.
+4) The default throughput is now the **as-measured** on-sky telescope+instrument response from
+spectro-photometric standard stars (may 2026: GD108, Feige110), replacing the pre-ship best-effort model as
+the default (the theoretical model remains available via `throughput_mode='theoretical'`, and is used as an
+automatic fallback where the standards give no clean measurement). The measured throughput runs ~0.6–0.75x
+the pre-ship theoretical prediction, so exposure-time forecasts are now more realistic (and more
+conservative) than earlier versions. Note the absolute scale is provisional pending a night-to-night
+transparency review; the wavelength shape is robust.
 
 If you develop new functionality for the ETC and would like to share this with future users, please contact the site administrator to request developer access to submit a pull request. We encourage regular users to share these improvements with the rest of the community!
 

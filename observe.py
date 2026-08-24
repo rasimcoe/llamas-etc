@@ -25,6 +25,15 @@ def observe_spectrum(instrument, texp, input_wv, input_spec, skyfile="eso_newmoo
     # Object containing operational parameters of the telescope
     magellan = tel.Telescope()
 
+    # Telescope MIRROR throughput factor. In 'measured' mode instrument.throughput is the on-sky
+    # telescope+instrument curve (mirrors already included), so we must NOT apply the mirror model
+    # again -> gate it to 1.0. In 'theoretical' mode it is applied as before. (magellan.Atel, the
+    # collecting AREA, is always used regardless of mode.)
+    if getattr(instrument, 'throughput_mode', 'theoretical') == 'measured':
+        tel_throughput = np.ones_like(instrument.waves)
+    else:
+        tel_throughput = magellan.throughput(instrument.waves)
+
     # "sky" is in photons/m2/s/micron/arcsec^2, we need to turn this into electrons (e-)
     # which requires multiplying by all factors in the demonimator
     # 
@@ -47,7 +56,7 @@ def observe_spectrum(instrument, texp, input_wv, input_spec, skyfile="eso_newmoo
         (instrument.waves/1.0e3)/instrument.R * \
         instrument.fiber.Afib * \
         instrument.throughput * \
-        magellan.throughput(instrument.waves) #e-
+        tel_throughput #e-
 
     # Convert from energy units (ergs) to counted photons
     h = 6.6e-27
@@ -64,7 +73,7 @@ def observe_spectrum(instrument, texp, input_wv, input_spec, skyfile="eso_newmoo
         texp * \
         (instrument.waves)/instrument.R * \
         instrument.throughput * \
-        magellan.throughput(instrument.waves) #e-
+        tel_throughput #e-
 
     readnoise = instrument.sensor.rn #e-
     dark      = instrument.sensor.dark * texp #e-/s * s
