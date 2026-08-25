@@ -10,7 +10,9 @@ Run from anywhere:
 
 Controls: input spectrum (defaults to the bundled SN1a_R20mag.fits), exposure time, airmass, seeing,
 source type (point / extended surface brightness), aperture, PSF, throughput mode, and which channels.
-The embedded plot shows counts and SNR vs wavelength; "Save results" writes a PNG + a CSV.
+The embedded plot shows the input spectrum (top) and SNR vs wavelength (bottom); "Save results" writes
+a PNG + a CSV. The input can optionally be normalized to a target AB magnitude (point source) or surface-
+brightness flux density (extended source) at a chosen pivot wavelength.
 """
 import os
 import sys
@@ -73,13 +75,15 @@ class ETCWindow(QtWidgets.QMainWindow):
         w = QtWidgets.QWidget(); w.setLayout(row)
         form.addRow('Input spectrum:', w)
 
-        # optional: rescale the loaded spectrum's SHAPE to a target AB magnitude at a pivot wavelength
-        self.norm_check = QtWidgets.QCheckBox('Normalize to AB magnitude')
+        # optional: rescale the loaded spectrum's SHAPE to a target brightness at a pivot wavelength.
+        # point source -> target is an AB magnitude; extended -> a surface-brightness flux density
+        # [erg/s/cm2/A/arcsec2]. The value field + its label adapt to the source type (see _on_source_changed).
+        self.norm_check = QtWidgets.QCheckBox('Normalize input at a pivot wavelength')
         self.norm_check.toggled.connect(self._on_norm_toggled)
         form.addRow(self.norm_check)
-        self.norm_mag = QtWidgets.QDoubleSpinBox()
-        self.norm_mag.setRange(5.0, 35.0); self.norm_mag.setSingleStep(0.1); self.norm_mag.setValue(20.0)
-        form.addRow('   AB magnitude:', self.norm_mag)
+        self.norm_lbl = QtWidgets.QLabel('   AB magnitude:')
+        self.norm_value = QtWidgets.QLineEdit('20')
+        form.addRow(self.norm_lbl, self.norm_value)
         self.norm_wave = QtWidgets.QDoubleSpinBox()
         self.norm_wave.setRange(300.0, 1100.0); self.norm_wave.setValue(550.0); self.norm_wave.setSuffix(' nm')
         form.addRow('   pivot wavelength:', self.norm_wave)
@@ -137,8 +141,8 @@ class ETCWindow(QtWidgets.QMainWindow):
         col = QtWidgets.QVBoxLayout()
         self.fig = Figure(figsize=(7, 6))
         self.canvas = FigureCanvasQTAgg(self.fig)
-        self.ax_counts = self.fig.add_subplot(2, 1, 1)
-        self.ax_snr = self.fig.add_subplot(2, 1, 2, sharex=self.ax_counts)
+        self.ax_input = self.fig.add_subplot(2, 1, 1)
+        self.ax_snr = self.fig.add_subplot(2, 1, 2, sharex=self.ax_input)
         col.addWidget(NavigationToolbar2QT(self.canvas, self))
         col.addWidget(self.canvas)
         return col
@@ -149,6 +153,13 @@ class ETCWindow(QtWidgets.QMainWindow):
         for w in (self.seeing, self.aperture, self.psf):
             w.setEnabled(point)
         self.nbin.setEnabled(not point)
+        # adapt the normalization target to the source type
+        if point:
+            self.norm_lbl.setText('   AB magnitude:')
+            self.norm_value.setText('20')
+        else:
+            self.norm_lbl.setText('   SB [erg/s/cm2/A/arcsec2]:')
+            self.norm_value.setText('1e-18')
 
     def _browse(self):
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
@@ -181,27 +192,38 @@ class ETCWindow(QtWidgets.QMainWindow):
 
     def _on_norm_toggled(self):
         on = self.norm_check.isChecked()
-        self.norm_mag.setEnabled(on); self.norm_wave.setEnabled(on)
+        for w in (self.norm_lbl, self.norm_value, self.norm_wave):
+            w.setEnabled(on)
 
-    def _normalized_flux(self):
-        """Return the input flux, optionally rescaled so its AB magnitude at the pivot wavelength equals
-        the requested value. f_nu = f_lambda * lambda^2 / c; m_AB = -2.5 log10(f_nu) - 48.60."""
+    def _normalized_flux(self, source):
+        """Return the input, optionally rescaled to a target brightness at the pivot wavelength.
+        point   -> target is an AB magnitude:  f_nu = f_lambda*lambda^2/c; m_AB = -2.5log10(f_nu) - 48.60.
+        extended-> target is a surface-brightness flux density [erg/s/cm2/A/arcsec2]: linear rescale."""
         if not self.norm_check.isChecked():
             return self.flux
         pivot_nm = self.norm_wave.value()
         if pivot_nm < self.wave_nm.min() or pivot_nm > self.wave_nm.max():
-            self._log('normalize: pivot %.0f nm outside spectrum (%.0f-%.0f nm); using loaded flux'
+            self._log('normalize: pivot %.0f nm outside spectrum (%.0f-%.0f nm); using loaded input'
                       % (pivot_nm, self.wave_nm.min(), self.wave_nm.max()))
             return self.flux
-        fl = float(np.interp(pivot_nm, self.wave_nm, self.flux))          # f_lambda at pivot [erg/s/cm2/A]
-        if not np.isfinite(fl) or fl <= 0:
-            self._log('normalize: flux at pivot <= 0; using loaded flux'); return self.flux
-        c_A = 2.99792458e18                                               # Angstrom / s
-        fnu = fl * (pivot_nm * 10.0) ** 2 / c_A                           # erg/s/cm2/Hz
-        m_current = -2.5 * np.log10(fnu) - 48.60
-        scale = 10.0 ** (-0.4 * (self.norm_mag.value() - m_current))
-        self._log('normalize: AB=%.2f at %.0f nm  (current AB=%.2f, scale x%.3g)'
-                  % (self.norm_mag.value(), pivot_nm, m_current, scale))
+        cur = float(np.interp(pivot_nm, self.wave_nm, self.flux))         # input value at pivot
+        if not np.isfinite(cur) or cur <= 0:
+            self._log('normalize: input at pivot <= 0; using loaded input'); return self.flux
+        try:
+            target = float(self.norm_value.text())
+        except ValueError:
+            self._log('normalize: cannot parse target "%s"; using loaded input' % self.norm_value.text())
+            return self.flux
+        if source == 'point':
+            c_A = 2.99792458e18                                          # Angstrom / s
+            m_current = -2.5 * np.log10(cur * (pivot_nm * 10.0) ** 2 / c_A) - 48.60
+            scale = 10.0 ** (-0.4 * (target - m_current))
+            self._log('normalize: AB=%.2f at %.0f nm (current AB=%.2f, x%.3g)'
+                      % (target, pivot_nm, m_current, scale))
+        else:
+            scale = target / cur
+            self._log('normalize: SB=%.3g at %.0f nm (current %.3g, x%.3g)'
+                      % (target, pivot_nm, cur, scale))
         return self.flux * scale
 
     def compute(self):
@@ -211,7 +233,9 @@ class ETCWindow(QtWidgets.QMainWindow):
         source = self.source.currentText(); mode = self.mode.currentText()
         ap_txt = self.aperture.currentText()
         aperture = ap_txt if ap_txt in ('optimal', 'single') else int(ap_txt)
-        flux = self._normalized_flux()
+        flux = self._normalized_flux(source)
+        self._flux_used = flux
+        self._source_used = source
         self._results = {}
         self._log('--- compute (%s, %s throughput) ---' % (source, mode))
         for name, specname, deffile, _ in CHANNELS:
@@ -235,20 +259,28 @@ class ETCWindow(QtWidgets.QMainWindow):
         self._replot()
 
     def _replot(self):
-        self.ax_counts.clear(); self.ax_snr.clear()
+        self.ax_input.clear(); self.ax_snr.clear()
+        # top panel: the input spectrum actually used (after any normalization), in physical units
+        if self.wave_nm is not None and getattr(self, '_flux_used', None) is not None:
+            self.ax_input.plot(self.wave_nm, self._flux_used, color='0.3', lw=0.8)
+        extended = getattr(self, '_source_used', 'point') == 'extended'
+        self.ax_input.set_ylabel('surface brightness\n[erg/s/cm2/A/arcsec2]' if extended
+                                 else 'flux density\n[erg/s/cm2/A]')
+        self.ax_input.set_title('input spectrum'); self.ax_input.grid(alpha=0.3)
+        # bottom panel: SNR per channel
         for name, _, _, color in CHANNELS:
             if name not in self._results:
                 continue
             waves, counts, noise = self._results[name]
             with np.errstate(invalid='ignore', divide='ignore'):
                 snr = counts / noise
-            self.ax_counts.plot(waves, counts, color=color, lw=0.8, label=name)
             self.ax_snr.plot(waves, snr, color=color, lw=0.8, label=name)
-        self.ax_counts.set_ylabel('counts [e-]'); self.ax_counts.grid(alpha=0.3)
         self.ax_snr.set_ylabel('SNR / pixel'); self.ax_snr.set_xlabel('wavelength [nm]')
         self.ax_snr.grid(alpha=0.3)
         if self._results:
-            self.ax_counts.legend(fontsize=8)
+            self.ax_snr.legend(fontsize=8)
+            allw = np.concatenate([self._results[n][0] for n in self._results])
+            self.ax_snr.set_xlim(float(np.nanmin(allw)), float(np.nanmax(allw)))   # focus on channel coverage
         self.fig.tight_layout()
         self.canvas.draw()
 
