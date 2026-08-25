@@ -3,6 +3,22 @@ Public exposure time calculator for the Magellan LLAMAS Integral Field Spectrogr
 
 Please review the supplied jupyter notebook LLAMAS_ETC_demo.ipynb for instructions on how to run the code.
 
+## Graphical interface (optional)
+
+If you prefer a GUI to the notebook, run the PyQt6 application:
+
+```bash
+pip install PyQt6        # one-time, if not already installed
+python etc_gui.py
+```
+
+It's a single window wrapping the same `observe_spectrum` engine: set the input spectrum (defaults to the
+bundled `SN1a_R20mag.fits`), exposure time, airmass, seeing, source type (point / extended surface
+brightness), aperture, PSF, throughput model, and channels. The input can optionally be normalized to a
+target AB magnitude (point source) or surface-brightness flux density (extended source) at a chosen pivot
+wavelength. The embedded three-panel plot shows the input spectrum, counts, and SNR vs wavelength, and
+"Save results" writes a PNG + CSV.
+
 ## Throughput: as-measured (default) vs. theoretical
 
 As of the first on-sky calibration, the ETC **defaults to the as-measured instrument throughput** derived
@@ -40,13 +56,35 @@ as `10^(-0.4·k(λ)·airmass)` (strongest in the blue). The sky-background airgl
 atmosphere and is not extincted like a source, so it is left unmodified (its mild airmass dependence is a
 future refinement).
 
+### Point sources (seeing) and extended sources
+
+For an **unresolved (point) source** (`source='point'`, the default; `input_spec` = flux density
+erg/cm2/s/A), the ETC computes the fraction of light captured by the fibre aperture from the seeing PSF:
+
+```python
+counts, noise = observe.observe_spectrum(llamas_green, texp, wave_nm, flux,
+                                         airmass=1.4, seeing=0.8, aperture='optimal')
+```
+
+`seeing` is the FWHM in arcsec (defaults to 0.8" with a warning); `aperture` is `'optimal'` (the fibre count
+that maximises SNR — default), `'single'` (one fibre), or an integer number of fibres; `psf` is `'moffat'`
+(default, index `beta`) or `'gaussian'`. Pass `seeing=0` to recover the pre-v1.1 "all light in one fibre"
+behaviour.
+
+For a **resolved (extended) source**, pass surface brightness (erg/cm2/s/A/arcsec²) with `source='extended'`;
+each fibre samples SB × (fibre solid angle) with no aperture loss, and `nbin` co-adds fibres (SNR ∝ √nbin):
+
+```python
+counts, noise = observe.observe_spectrum(llamas_green, texp, wave_nm, sb, source='extended', nbin=1)
+```
+
 # Caveats
 
 There are a few items to remember when interpreting results from the exposure time calculator:
 
-1) The ETC assumes that all of the light goes down a single fiber, i.e. that the source is unresolved in the 0.75" spaxel. If your source is resolved, or the seeing is lousy, you will need to adjust these outputs accordingly, and we have not yet implemented that functionality (though it would be straightforward to split the light across N fibers/spaxels).  
+1) **Point sources / seeing (now handled):** for an unresolved source the ETC computes the fraction of light captured by the fibre aperture from the seeing PSF, rather than assuming all light lands in one fibre. Set `seeing` (FWHM arcsec) and `aperture` (`'optimal'`/`'single'`/integer); pass `seeing=0` for the old full-capture behaviour. (See "Point sources (seeing) and extended sources" above.)
 
-2) The ETC uses units of flux, and not surface brightness, but surface brightness is the more appropriate unit for resolved sources.  Future ETC versions may include surface brightness calculations, but intrepid users can implement this on their own using the following hints. Surface brightness can often be expressed in units of erg/cm2/s/A/square arcsec, or can be converted into these units from magnitudes per square arcsec or your unit of choice. It is your responsibility to convert into the first set of units (erg/cm2/s/A/sq.arcsec). Then, the subtended area of a fiber is provided as an attribute in the spectrograph object: for example, llamas_blue.fiber.Afib (in square arcseconds). Multiply your surface brightness spectrum by this value, and then input that to the observe.observe_spectrum subroutine to output a correct SNR calculation!
+2) **Extended sources / surface brightness (now handled):** pass surface brightness (erg/cm2/s/A/arcsec²) with `source='extended'` and the ETC integrates over the fibre solid angle for you; use `nbin` to co-add fibres. Earlier versions required manually multiplying your surface-brightness spectrum by `fiber.Afib` and passing it as flux — that workaround is no longer necessary.
 
 3) The ETC uses an average value for spectral R over the full instrument range and does not account for variations across the bandpass. This will be added in future releases.
 
