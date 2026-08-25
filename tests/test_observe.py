@@ -66,6 +66,27 @@ def test_higher_airmass_lower_counts():
     assert _med(c2) < _med(c1)
 
 
+def test_full_moon_raises_sky_noise():
+    g, wv, fl = _setup()
+    _, n_dark = observe.observe_spectrum(g, 1200, wv, fl, airmass=1.2, seeing=0.8)
+    _, n_moon = observe.observe_spectrum(g, 1200, wv, fl, airmass=1.2, seeing=0.8,
+                                         moon_illum=1.0, moon_sep=60, moon_alt=60)
+    assert _med(n_moon) > _med(n_dark)                   # bright moon brightens the sky
+
+
+def test_moon_below_horizon_equals_dark():
+    g, wv, fl = _setup()
+    _, n_dark = observe.observe_spectrum(g, 1200, wv, fl, airmass=1.2, seeing=0.8)
+    _, n_down = observe.observe_spectrum(g, 1200, wv, fl, airmass=1.2, seeing=0.8,
+                                         moon_illum=1.0, moon_sep=60, moon_alt=-5)
+    assert np.allclose(n_down, n_dark)                   # moon below the horizon adds nothing
+
+
+def test_moon_background_is_bluer():
+    m = observe.moon_sky_radiance(np.array([400.0, 900.0]), 1.0, 60, 60, 1.2, 0.12)
+    assert m[0] > m[1]                                   # more moon background in the blue
+
+
 if __name__ == '__main__':
     fns = [v for k, v in sorted(globals().items()) if k.startswith('test_')]
     for fn in fns:

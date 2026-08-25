@@ -24,9 +24,50 @@ def aperture_radius(nfib, Afib):
     return np.sqrt(nfib * Afib / np.pi)
 
 
+def moon_sky_radiance(waves_nm, illum, sep_deg, alt_deg, airmass, k_V, T_sun=5777.0):
+    """Scattered-moonlight sky background as an ADDED photon radiance [photons/m2/s/micron/arcsec2] on
+    ``waves_nm`` -- the Krisciunas & Schaefer (1991) optical model. Zero for a new moon or a moon below
+    the horizon.
+
+        illum   : lunar illuminated fraction, 0 (new) .. 1 (full).
+        sep_deg : moon-target angular separation [deg].
+        alt_deg : moon altitude [deg].
+        airmass : target airmass (sec z).
+        k_V     : V-band atmospheric extinction [mag/airmass].
+
+    KS91 gives the V-band sky-brightness increase; it is coloured here by a solar (``T_sun``) Planck
+    spectrum with a Rayleigh (550nm/lambda)^4 blue boost, normalised at 550 nm -- so the moon background
+    is bluer than the dark sky. This is the standard ETC-level approximation (the ESO Paranal sky model
+    is more detailed: multiple scattering, aerosols)."""
+    waves_nm = np.asarray(waves_nm, float)
+    if illum is None or alt_deg is None or alt_deg <= 0.0:
+        return np.zeros_like(waves_nm)
+    illum = min(max(float(illum), 0.0), 1.0)
+    alpha = np.degrees(np.arccos(2.0 * illum - 1.0))              # phase angle: 0=full, 180=new [deg]
+    m_moon = -12.73 + 0.026 * alpha + 4.0e-9 * alpha ** 4         # KS91 moon V magnitude
+    I_star = 10.0 ** (-0.4 * (m_moon + 16.57))                   # lunar illuminance
+    f_rho = 10.0 ** 5.36 * (1.06 + np.cos(np.radians(sep_deg)) ** 2) + 10.0 ** (6.15 - sep_deg / 40.0)
+    s = np.sin(np.radians(90.0 - alt_deg))
+    X_moon = (1.0 - 0.96 * s * s) ** (-0.5)                      # KS91 airmass at the moon
+    B_moon = f_rho * I_star * 10.0 ** (-0.4 * k_V * X_moon) * (1.0 - 10.0 ** (-0.4 * k_V * airmass))  # nanoLamberts
+    if not np.isfinite(B_moon) or B_moon <= 0.0:
+        return np.zeros_like(waves_nm)
+    mu_V = (20.7233 - np.log(B_moon / 34.08)) / 0.92104          # V surface brightness [mag/arcsec2]
+    # spectral shape: solar Planck (energy) x Rayleigh (550/lambda)^4, normalised at 550 nm
+    h = 6.62607e-27; c = 2.99792e10; kB = 1.38065e-16
+    def planck_energy(lam_nm):
+        lam_cm = np.asarray(lam_nm, float) * 1.0e-7
+        return lam_cm ** -5 / (np.exp(h * c / (lam_cm * kB * T_sun)) - 1.0)
+    shape = (planck_energy(waves_nm) / planck_energy(550.0)) * (550.0 / waves_nm) ** 4
+    f_lambda = 3.631e-9 * 10.0 ** (-0.4 * mu_V) * shape          # erg/s/cm2/A/arcsec2 (V zeropoint x shape)
+    photons_cm2_A = f_lambda * (waves_nm * 1.0e-7) / (h * c)     # photons/s/cm2/A/arcsec2
+    return photons_cm2_A * 1.0e8                                 # -> photons/m2/s/micron/arcsec2
+
+
 def observe_spectrum(instrument, texp, input_wv, input_spec, airmass=None,
                      source='point', seeing=None, aperture='optimal', psf='moffat', beta=2.5,
-                     nbin=1, skyfile="eso_newmoon_radiance.txt", extfile="lco_extinction.txt"):
+                     nbin=1, moon_illum=None, moon_sep=90.0, moon_alt=45.0,
+                     skyfile="eso_newmoon_radiance.txt", extfile="lco_extinction.txt"):
     """Simulate a LLAMAS observation; return (counts, noise) in e- on the channel's wavelength grid.
 
     source='point' (default): ``input_spec`` is flux density f_lambda [erg/cm2/s/A]. The fraction of the
@@ -39,6 +80,10 @@ def observe_spectrum(instrument, texp, input_wv, input_spec, airmass=None,
 
     source='extended': ``input_spec`` is surface brightness [erg/cm2/s/A/arcsec2]; per-fibre signal =
         SB * fibre area, with no aperture loss. ``nbin`` co-adds nbin fibres (SNR improves as sqrt(nbin)).
+
+    Moonlight (optional): pass ``moon_illum`` (illuminated fraction 0..1) to add a scattered-moonlight sky
+        background (Krisciunas & Schaefer 1991) on top of the dark sky. ``moon_sep`` = moon-target
+        separation [deg], ``moon_alt`` = moon altitude [deg]. Default (moon_illum=None) is the dark sky.
     """
     # --- airmass / atmospheric extinction (v1.0) ---
     if airmass is None:
@@ -77,6 +122,19 @@ def observe_spectrum(instrument, texp, input_wv, input_spec, airmass=None,
     except Exception as e:
         print("   extinction file unavailable (" + str(e) + "); NOT applying atmospheric extinction")
         atm = np.ones_like(instrument.waves)
+
+    # Optional scattered-moonlight background (Krisciunas & Schaefer 1991), added to the dark sky.
+    if moon_illum is not None:
+        try:
+            k_V = float(np.interp(550.0, ke['wave_nm'], ke['k']))
+        except Exception:
+            k_V = 0.12
+        moon = moon_sky_radiance(instrument.waves, moon_illum, moon_sep, moon_alt, airmass, k_V)
+        sky = sky + moon
+        tag = ('below horizon/new -> no added background' if not np.any(moon > 0)
+               else 'added (bluer than dark sky)')
+        print("   moon: illum={:.2f}, sep={:.0f} deg, alt={:.0f} deg -> {}"
+              .format(min(max(moon_illum, 0.0), 1.0), moon_sep, moon_alt, tag))
 
     # Sky electrons in ONE fibre (per resolution element). See v1.0 notes on the (waves/1e3)/R bandwidth.
     sky_perfib = sky * magellan.Atel / (100 ** 2) * texp * (instrument.waves / 1.0e3) / instrument.R * \

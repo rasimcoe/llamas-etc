@@ -14,7 +14,8 @@ python etc_gui.py
 
 It's a single window wrapping the same `observe_spectrum` engine: set the input spectrum (defaults to the
 bundled `SN1a_R20mag.fits`), exposure time, airmass, seeing, source type (point / extended surface
-brightness), aperture, PSF, throughput model, and channels. The input can optionally be normalized to a
+brightness), aperture, PSF, throughput model, an optional moonlight background (lunar phase / separation /
+altitude), and channels. The input can optionally be normalized to a
 target AB magnitude (point source) or surface-brightness flux density (extended source) at a chosen pivot
 wavelength. The embedded three-panel plot shows the input spectrum, counts, and SNR vs wavelength, and
 "Save results" writes a PNG + CSV.
@@ -77,6 +78,21 @@ each fibre samples SB × (fibre solid angle) with no aperture loss, and `nbin` c
 ```python
 counts, noise = observe.observe_spectrum(llamas_green, texp, wave_nm, sb, source='extended', nbin=1)
 ```
+
+### Moonlight (sky background)
+
+By default the sky is the dark (new-moon) spectrum. To include scattered moonlight — a diffuse, wavelength-
+dependent background that is bluer than the dark sky — pass the lunar geometry:
+
+```python
+counts, noise = observe.observe_spectrum(llamas_green, texp, wave_nm, flux, airmass=1.4,
+                                         moon_illum=0.7, moon_sep=60, moon_alt=45)
+```
+
+`moon_illum` is the illuminated fraction (0 = new, 1 = full), `moon_sep` the moon–target separation [deg],
+and `moon_alt` the moon altitude [deg] (a moon below the horizon adds nothing). The background follows the
+**Krisciunas & Schaefer (1991)** V-band model, coloured by a scattered-solar (Rayleigh λ⁻⁴) spectrum — an
+ETC-level approximation; the ESO Paranal sky model is more detailed. Omit `moon_illum` for the dark sky.
 
 # Caveats
 

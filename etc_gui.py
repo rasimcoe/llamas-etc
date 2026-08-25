@@ -9,7 +9,8 @@ Run from anywhere:
     python etc_gui.py
 
 Controls: input spectrum (defaults to the bundled SN1a_R20mag.fits), exposure time, airmass, seeing,
-source type (point / extended surface brightness), aperture, PSF, throughput mode, and which channels.
+source type (point / extended surface brightness), aperture, PSF, throughput mode, an optional moonlight
+sky background (lunar phase / separation / altitude), and which channels.
 The embedded plot shows three stacked panels vs wavelength -- input spectrum, counts, and SNR;
 "Save results" writes a PNG + a CSV. The input can optionally be normalized to a target AB magnitude (point source) or surface-
 brightness flux density (extended source) at a chosen pivot wavelength.
@@ -60,6 +61,7 @@ class ETCWindow(QtWidgets.QMainWindow):
         self._load_spectrum(DEFAULT_SPECTRUM)
         self._on_source_changed()
         self._on_norm_toggled()
+        self._on_moon_toggled()
         self.compute()
 
     # ---------------- UI ----------------
@@ -117,6 +119,20 @@ class ETCWindow(QtWidgets.QMainWindow):
 
         self.mode = QtWidgets.QComboBox(); self.mode.addItems(['measured', 'theoretical'])
         form.addRow('Throughput model:', self.mode)
+
+        # optional moonlight sky background (Krisciunas & Schaefer 1991)
+        self.moon_check = QtWidgets.QCheckBox('Add moonlight')
+        self.moon_check.toggled.connect(self._on_moon_toggled)
+        form.addRow(self.moon_check)
+        self.moon_illum = QtWidgets.QDoubleSpinBox()
+        self.moon_illum.setRange(0.0, 1.0); self.moon_illum.setSingleStep(0.05); self.moon_illum.setValue(0.5)
+        form.addRow('   illuminated fraction:', self.moon_illum)
+        self.moon_sep = QtWidgets.QDoubleSpinBox()
+        self.moon_sep.setRange(0.0, 180.0); self.moon_sep.setValue(90.0); self.moon_sep.setSuffix(' deg')
+        form.addRow('   moon-target separation:', self.moon_sep)
+        self.moon_alt = QtWidgets.QDoubleSpinBox()
+        self.moon_alt.setRange(-10.0, 90.0); self.moon_alt.setValue(45.0); self.moon_alt.setSuffix(' deg')
+        form.addRow('   moon altitude:', self.moon_alt)
 
         self.ch_boxes = {}
         chrow = QtWidgets.QHBoxLayout()
@@ -196,6 +212,11 @@ class ETCWindow(QtWidgets.QMainWindow):
         for w in (self.norm_lbl, self.norm_value, self.norm_wave):
             w.setEnabled(on)
 
+    def _on_moon_toggled(self):
+        on = self.moon_check.isChecked()
+        for w in (self.moon_illum, self.moon_sep, self.moon_alt):
+            w.setEnabled(on)
+
     def _normalized_flux(self, source):
         """Return the input, optionally rescaled to a target brightness at the pivot wavelength.
         point   -> target is an AB magnitude:  f_nu = f_lambda*lambda^2/c; m_AB = -2.5log10(f_nu) - 48.60.
@@ -235,10 +256,13 @@ class ETCWindow(QtWidgets.QMainWindow):
         ap_txt = self.aperture.currentText()
         aperture = ap_txt if ap_txt in ('optimal', 'single') else int(ap_txt)
         flux = self._normalized_flux(source)
+        moon_kw = dict(moon_illum=self.moon_illum.value(), moon_sep=self.moon_sep.value(),
+                       moon_alt=self.moon_alt.value()) if self.moon_check.isChecked() else {}
         self._flux_used = flux
         self._source_used = source
         self._results = {}
-        self._log('--- compute (%s, %s throughput) ---' % (source, mode))
+        self._log('--- compute (%s, %s throughput%s) ---'
+                  % (source, mode, ', moonlight' if moon_kw else ''))
         for name, specname, deffile, _ in CHANNELS:
             if not self.ch_boxes[name].isChecked():
                 continue
@@ -249,11 +273,11 @@ class ETCWindow(QtWidgets.QMainWindow):
                     counts, noise = observe.observe_spectrum(
                         model, texp, self.wave_nm, flux, airmass=airmass,
                         source='point', seeing=self.seeing.value(), aperture=aperture,
-                        psf=self.psf.currentText())
+                        psf=self.psf.currentText(), **moon_kw)
                 else:
                     counts, noise = observe.observe_spectrum(
                         model, texp, self.wave_nm, flux, airmass=airmass,
-                        source='extended', nbin=self.nbin.value())
+                        source='extended', nbin=self.nbin.value(), **moon_kw)
             self._results[name] = (model.waves, counts, noise)
             for line in buf.getvalue().strip().splitlines():
                 self._log('[%s] %s' % (name, line.strip()))
