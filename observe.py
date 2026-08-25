@@ -5,7 +5,19 @@ import os
 import matplotlib.pyplot as plt
 from astropy.io import fits
 
-def observe_spectrum(instrument, texp, input_wv, input_spec, skyfile="eso_newmoon_radiance.txt"):
+def observe_spectrum(instrument, texp, input_wv, input_spec, airmass=None,
+                     skyfile="eso_newmoon_radiance.txt", extfile="lco_extinction.txt"):
+
+    # Atmospheric extinction of the SOURCE. The instrument throughput (measured or theoretical) is
+    # referenced to ABOVE the atmosphere, so we apply extinction here for the observation's airmass.
+    # Defaults to 1.0 (zenith) with a warning; pass airmass=sec(z) for a real observation. (Sky airglow
+    # is emitted high in the atmosphere and is NOT extincted like a source, so it is left unmodified.)
+    if airmass is None:
+        airmass = 1.0
+        print("WARNING: no airmass given -- assuming airmass = 1.0 (zenith, best case). "
+              "Pass airmass=sec(z) for your observation; higher airmass gives lower throughput.")
+    else:
+        print("   applying atmospheric extinction at airmass = {:.3f}".format(airmass))
 
     if (os.path.isfile(skyfile)):
         full_path = skyfile
@@ -24,6 +36,26 @@ def observe_spectrum(instrument, texp, input_wv, input_spec, skyfile="eso_newmoo
 
     # Object containing operational parameters of the telescope
     magellan = tel.Telescope()
+
+    # Telescope MIRROR throughput factor. In 'measured' mode instrument.throughput is the on-sky
+    # telescope+instrument curve (mirrors already included), so we must NOT apply the mirror model
+    # again -> gate it to 1.0. In 'theoretical' mode it is applied as before. (magellan.Atel, the
+    # collecting AREA, is always used regardless of mode.)
+    if getattr(instrument, 'throughput_mode', 'theoretical') == 'measured':
+        tel_throughput = np.ones_like(instrument.waves)
+    else:
+        tel_throughput = magellan.throughput(instrument.waves)
+
+    # Atmospheric transmission for the source: 10^(-0.4 * k(lambda) * airmass), k = Las Campanas
+    # extinction [mag/airmass] (COATINGS/lco_extinction.txt: col1 nm, col2 k).
+    ext_path = extfile if os.path.isfile(extfile) else os.environ.get('COATINGS_PATH', './COATINGS/') + extfile
+    try:
+        ke = np.genfromtxt(ext_path, usecols=[0, 1], names=['wave_nm', 'k'])
+        kwave = np.interp(instrument.waves, ke['wave_nm'], ke['k'], left=ke['k'][0], right=ke['k'][-1])
+        atm = 10.0 ** (-0.4 * kwave * airmass)
+    except Exception as e:
+        print("   extinction file unavailable (" + str(e) + "); NOT applying atmospheric extinction")
+        atm = np.ones_like(instrument.waves)
 
     # "sky" is in photons/m2/s/micron/arcsec^2, we need to turn this into electrons (e-)
     # which requires multiplying by all factors in the demonimator
@@ -47,7 +79,7 @@ def observe_spectrum(instrument, texp, input_wv, input_spec, skyfile="eso_newmoo
         (instrument.waves/1.0e3)/instrument.R * \
         instrument.fiber.Afib * \
         instrument.throughput * \
-        magellan.throughput(instrument.waves) #e-
+        tel_throughput #e-
 
     # Convert from energy units (ergs) to counted photons
     h = 6.6e-27
@@ -64,7 +96,8 @@ def observe_spectrum(instrument, texp, input_wv, input_spec, skyfile="eso_newmoo
         texp * \
         (instrument.waves)/instrument.R * \
         instrument.throughput * \
-        magellan.throughput(instrument.waves) #e-
+        tel_throughput * \
+        atm #e-  (atm = atmospheric extinction for the source at the requested airmass)
 
     readnoise = instrument.sensor.rn #e-
     dark      = instrument.sensor.dark * texp #e-/s * s

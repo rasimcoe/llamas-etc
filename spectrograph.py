@@ -24,8 +24,14 @@ class Spectrograph:
         self.fiber      =    FiberFeed()
         self.waves      =    0.0
         self.throughput =    0.0
+        self.throughput_mode   = 'measured'   # 'measured' (on-sky, default) | 'theoretical' (pre-ship model)
+        self.throughput_theory = 0.0          # always-computed theoretical instrument-only curve
+        self.throughput_measured = None       # measured tel+inst curve on self.waves (measured mode)
 
-    def build_model(self,config_file):
+    def build_model(self,config_file,throughput_mode='measured'):
+        # throughput_mode: 'measured' = on-sky telescope+instrument from standard stars (NEW DEFAULT);
+        #                  'theoretical' = pre-ship product-of-optical-elements model (calc_throughput).
+        self.throughput_mode = throughput_mode
         # Read in the instrument model parameters from file
         with open(config_file) as input:
             for line in input:
@@ -84,7 +90,36 @@ class Spectrograph:
             # of each pixel and store along with the total throguhput.
             disp = (self.wv_max-self.wv_min)/float(self.sensor.naxis1)
             self.waves  = self.wv_min+np.arange(self.sensor.naxis1)*disp
-            self.throughput = self.calc_throughput(self.waves)
+            self.throughput_theory = self.calc_throughput(self.waves)   # theoretical, instrument-only
+            if (self.throughput_mode == 'measured'):
+                # on-sky telescope+instrument (extinction removed); observe.py must NOT re-apply the
+                # telescope factor in this mode (it is already contained in this curve).
+                self.throughput = self._measured_throughput(self.waves)
+            else:
+                self.throughput = self.throughput_theory                # theoretical instrument-only
+
+    def _measured_throughput(self,waves):
+        # Load the as-measured telescope+instrument throughput for this channel (may26 standard stars,
+        # GD108+Feige110; see COATINGS/measured_throughput_{blue,green,red}.txt, 2-col nm/fraction).
+        # Where the measurement has no coverage (channel edges + the broad red H2O 890-990 nm) fall back
+        # to the THEORETICAL telescope+instrument = calc_throughput() * telescope mirrors.
+        import telescope
+        low = self.name.lower()
+        ch = 'blue' if 'blue' in low else ('green' if 'green' in low else ('red' if 'red' in low else None))
+        try:
+            path = os.environ.get('COATINGS_PATH','./COATINGS/')
+            d = np.genfromtxt(os.path.join(path,'measured_throughput_'+ch+'.txt'))
+            mw, mt = d[:,0], d[:,1]
+            meas = np.interp(waves, mw, mt, left=np.nan, right=np.nan)
+            idx = np.clip(np.searchsorted(mw, waves), 1, len(mw)-1)     # flag internal no-data gaps
+            dist = np.minimum(np.abs(waves-mw[idx]), np.abs(waves-mw[idx-1]))
+            meas[dist > 20.0] = np.nan                                  # >20 nm from any sample -> no data
+        except Exception as e:
+            print("   measured throughput unavailable ("+str(e)+"); falling back to theoretical")
+            return self.throughput_theory
+        tel_ti = self.throughput_theory * telescope.Telescope().throughput(waves)   # theoretical fallback
+        self.throughput_measured = meas
+        return np.where(np.isfinite(meas), meas, tel_ti)
 
     def calc_throughput(self,input_wave,nofront=False):
         composite_throughput = np.ones(len(input_wave))
