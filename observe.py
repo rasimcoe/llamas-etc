@@ -24,10 +24,36 @@ def aperture_radius(nfib, Afib):
     return np.sqrt(nfib * Afib / np.pi)
 
 
-def moon_sky_radiance(waves_nm, illum, sep_deg, alt_deg, airmass, k_V, T_sun=5777.0):
+_MOON_COLOR = None
+
+
+def _moon_color_shape(waves_nm, sep_deg):
+    """ESO SkyCalc scattered-moonlight colour (``flux_sml`` normalised to 1.0 at 550 nm) interpolated to
+    the requested moon-target separation and wavelengths, from the bundled grid
+    COATINGS/eso_moon_color.npz. Falls back to a flat (grey) spectrum if the grid is missing."""
+    global _MOON_COLOR
+    if _MOON_COLOR is None:
+        p = 'COATINGS/eso_moon_color.npz'
+        p = p if os.path.isfile(p) else os.environ.get('COATINGS_PATH', './COATINGS/') + 'eso_moon_color.npz'
+        try:
+            d = np.load(p)
+            _MOON_COLOR = (np.asarray(d['wave_nm'], float), np.asarray(d['sep_deg'], float),
+                           np.asarray(d['color'], float))
+        except Exception:
+            _MOON_COLOR = False
+    if not _MOON_COLOR:
+        return np.ones_like(np.asarray(waves_nm, float))
+    gw, gs, gc = _MOON_COLOR
+    s = float(np.clip(sep_deg, gs.min(), gs.max()))
+    j = int(np.clip(np.searchsorted(gs, s) - 1, 0, len(gs) - 2))
+    w = (s - gs[j]) / (gs[j + 1] - gs[j]) if gs[j + 1] != gs[j] else 0.0
+    col = (1.0 - w) * gc[j] + w * gc[j + 1]                       # colour at this separation (grid wave grid)
+    return np.interp(waves_nm, gw, col, left=col[0], right=col[-1])
+
+
+def moon_sky_radiance(waves_nm, illum, sep_deg, alt_deg, airmass, k_V):
     """Scattered-moonlight sky background as an ADDED photon radiance [photons/m2/s/micron/arcsec2] on
-    ``waves_nm`` -- the Krisciunas & Schaefer (1991) optical model. Zero for a new moon or a moon below
-    the horizon.
+    ``waves_nm``. Zero for a new moon or a moon below the horizon.
 
         illum   : lunar illuminated fraction, 0 (new) .. 1 (full).
         sep_deg : moon-target angular separation [deg].
@@ -35,10 +61,11 @@ def moon_sky_radiance(waves_nm, illum, sep_deg, alt_deg, airmass, k_V, T_sun=577
         airmass : target airmass (sec z).
         k_V     : V-band atmospheric extinction [mag/airmass].
 
-    KS91 gives the V-band sky-brightness increase; it is coloured here by a solar (``T_sun``) Planck
-    spectrum with a Rayleigh (550nm/lambda)^4 blue boost, normalised at 550 nm -- so the moon background
-    is bluer than the dark sky. This is the standard ETC-level approximation (the ESO Paranal sky model
-    is more detailed: multiple scattering, aerosols)."""
+    The V-band brightness LEVEL follows Krisciunas & Schaefer (1991); the spectral COLOUR is taken from
+    the ESO SkyCalc sky model (Jones et al. 2013 scattered moonlight; bundled grid
+    COATINGS/eso_moon_color.npz), interpolated by moon-target separation and normalised at 550 nm. The
+    ESO colour is far less steeply blue than a single-scattering Rayleigh law -- important for the LLAMAS
+    blue channel. (Separation dominates the colour; phase and airmass are second-order.)"""
     waves_nm = np.asarray(waves_nm, float)
     if illum is None or alt_deg is None or alt_deg <= 0.0:
         return np.zeros_like(waves_nm)
@@ -52,16 +79,14 @@ def moon_sky_radiance(waves_nm, illum, sep_deg, alt_deg, airmass, k_V, T_sun=577
     B_moon = f_rho * I_star * 10.0 ** (-0.4 * k_V * X_moon) * (1.0 - 10.0 ** (-0.4 * k_V * airmass))  # nanoLamberts
     if not np.isfinite(B_moon) or B_moon <= 0.0:
         return np.zeros_like(waves_nm)
-    mu_V = (20.7233 - np.log(B_moon / 34.08)) / 0.92104          # V surface brightness [mag/arcsec2]
-    # spectral shape: solar Planck (energy) x Rayleigh (550/lambda)^4, normalised at 550 nm
-    h = 6.62607e-27; c = 2.99792e10; kB = 1.38065e-16
-    def planck_energy(lam_nm):
-        lam_cm = np.asarray(lam_nm, float) * 1.0e-7
-        return lam_cm ** -5 / (np.exp(h * c / (lam_cm * kB * T_sun)) - 1.0)
-    shape = (planck_energy(waves_nm) / planck_energy(550.0)) * (550.0 / waves_nm) ** 4
-    f_lambda = 3.631e-9 * 10.0 ** (-0.4 * mu_V) * shape          # erg/s/cm2/A/arcsec2 (V zeropoint x shape)
-    photons_cm2_A = f_lambda * (waves_nm * 1.0e-7) / (h * c)     # photons/s/cm2/A/arcsec2
-    return photons_cm2_A * 1.0e8                                 # -> photons/m2/s/micron/arcsec2
+    mu_V = (20.7233 - np.log(B_moon / 34.08)) / 0.92104          # V surface brightness [mag/arcsec2] (KS91)
+    shape = _moon_color_shape(waves_nm, sep_deg)                 # ESO SkyCalc PHOTON colour, = 1.0 at 550 nm
+    h = 6.62607e-27; c = 2.99792e10                              # erg s ; cm/s
+    # KS91 level -> V PHOTON radiance in the ETC's sky units [photons/m2/s/micron/arcsec2] (f_lambda V
+    # zeropoint / photon energy at 550 nm), then apply the ESO photon colour. flux_sml is already photon
+    # radiance, so there is NO further f_lambda->photon (x lambda) conversion.
+    R_V = 3.631e-9 * 10.0 ** (-0.4 * mu_V) * (550.0e-7) / (h * c) * 1.0e8
+    return R_V * shape
 
 
 def observe_spectrum(instrument, texp, input_wv, input_spec, airmass=None,

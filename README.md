@@ -90,9 +90,12 @@ counts, noise = observe.observe_spectrum(llamas_green, texp, wave_nm, flux, airm
 ```
 
 `moon_illum` is the illuminated fraction (0 = new, 1 = full), `moon_sep` the moon–target separation [deg],
-and `moon_alt` the moon altitude [deg] (a moon below the horizon adds nothing). The background follows the
-**Krisciunas & Schaefer (1991)** V-band model, coloured by a scattered-solar (Rayleigh λ⁻⁴) spectrum — an
-ETC-level approximation; the ESO Paranal sky model is more detailed. Omit `moon_illum` for the dark sky.
+and `moon_alt` the moon altitude [deg] (a moon below the horizon adds nothing). The overall brightness
+follows the **Krisciunas & Schaefer (1991)** V-band model, and the **spectral colour is taken from the ESO
+SkyCalc sky model** (Jones et al. 2013 scattered moonlight), bundled as a separation grid in
+`COATINGS/eso_moon_color.npz` (regenerable with `tools/generate_moon_color.py`). This reproduces the real
+moonlight colour — much flatter than a Rayleigh λ⁻⁴ law — which matters for the blue channel. Omit
+`moon_illum` for the dark sky.
 
 # Caveats
 
