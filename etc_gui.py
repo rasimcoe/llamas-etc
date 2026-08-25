@@ -10,8 +10,8 @@ Run from anywhere:
 
 Controls: input spectrum (defaults to the bundled SN1a_R20mag.fits), exposure time, airmass, seeing,
 source type (point / extended surface brightness), aperture, PSF, throughput mode, and which channels.
-The embedded plot shows the input spectrum (top) and SNR vs wavelength (bottom); "Save results" writes
-a PNG + a CSV. The input can optionally be normalized to a target AB magnitude (point source) or surface-
+The embedded plot shows three stacked panels vs wavelength -- input spectrum, counts, and SNR;
+"Save results" writes a PNG + a CSV. The input can optionally be normalized to a target AB magnitude (point source) or surface-
 brightness flux density (extended source) at a chosen pivot wavelength.
 """
 import os
@@ -139,10 +139,11 @@ class ETCWindow(QtWidgets.QMainWindow):
 
     def _build_plot(self):
         col = QtWidgets.QVBoxLayout()
-        self.fig = Figure(figsize=(7, 6))
+        self.fig = Figure(figsize=(7, 8.2))
         self.canvas = FigureCanvasQTAgg(self.fig)
-        self.ax_input = self.fig.add_subplot(2, 1, 1)
-        self.ax_snr = self.fig.add_subplot(2, 1, 2, sharex=self.ax_input)
+        self.ax_input = self.fig.add_subplot(3, 1, 1)
+        self.ax_counts = self.fig.add_subplot(3, 1, 2, sharex=self.ax_input)
+        self.ax_snr = self.fig.add_subplot(3, 1, 3, sharex=self.ax_input)
         col.addWidget(NavigationToolbar2QT(self.canvas, self))
         col.addWidget(self.canvas)
         return col
@@ -259,7 +260,7 @@ class ETCWindow(QtWidgets.QMainWindow):
         self._replot()
 
     def _replot(self):
-        self.ax_input.clear(); self.ax_snr.clear()
+        self.ax_input.clear(); self.ax_counts.clear(); self.ax_snr.clear()
         # top panel: the input spectrum actually used (after any normalization), in physical units
         if self.wave_nm is not None and getattr(self, '_flux_used', None) is not None:
             self.ax_input.plot(self.wave_nm, self._flux_used, color='0.3', lw=0.8)
@@ -267,18 +268,20 @@ class ETCWindow(QtWidgets.QMainWindow):
         self.ax_input.set_ylabel('surface brightness\n[erg/s/cm2/A/arcsec2]' if extended
                                  else 'flux density\n[erg/s/cm2/A]')
         self.ax_input.set_title('input spectrum'); self.ax_input.grid(alpha=0.3)
-        # bottom panel: SNR per channel
+        # middle: counts per channel; bottom: SNR per channel
         for name, _, _, color in CHANNELS:
             if name not in self._results:
                 continue
             waves, counts, noise = self._results[name]
             with np.errstate(invalid='ignore', divide='ignore'):
                 snr = counts / noise
+            self.ax_counts.plot(waves, counts, color=color, lw=0.8, label=name)
             self.ax_snr.plot(waves, snr, color=color, lw=0.8, label=name)
+        self.ax_counts.set_ylabel('counts [e-]'); self.ax_counts.grid(alpha=0.3)
         self.ax_snr.set_ylabel('SNR / pixel'); self.ax_snr.set_xlabel('wavelength [nm]')
         self.ax_snr.grid(alpha=0.3)
         if self._results:
-            self.ax_snr.legend(fontsize=8)
+            self.ax_counts.legend(fontsize=8)
             allw = np.concatenate([self._results[n][0] for n in self._results])
             self.ax_snr.set_xlim(float(np.nanmin(allw)), float(np.nanmax(allw)))   # focus on channel coverage
         self.fig.tight_layout()
@@ -310,7 +313,7 @@ class ETCWindow(QtWidgets.QMainWindow):
 def main():
     app = QtWidgets.QApplication(sys.argv)
     win = ETCWindow()
-    win.resize(1100, 680)
+    win.resize(1100, 860)
     win.show()
     sys.exit(app.exec())
 
