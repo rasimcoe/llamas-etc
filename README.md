@@ -14,8 +14,10 @@ python etc_gui.py
 
 It's a single window wrapping the same `observe_spectrum` engine: set the input spectrum (defaults to the
 bundled `SN1a_R20mag.fits`), exposure time, airmass, seeing, source type (point / extended surface
-brightness), aperture, PSF, throughput model, and channels; the embedded plot shows counts and SNR vs
-wavelength, and "Save results" writes a PNG + CSV.
+brightness), aperture, PSF, throughput model, and channels. The input can optionally be normalized to a
+target AB magnitude (point source) or surface-brightness flux density (extended source) at a chosen pivot
+wavelength. The embedded three-panel plot shows the input spectrum, counts, and SNR vs wavelength, and
+"Save results" writes a PNG + CSV.
 
 ## Throughput: as-measured (default) vs. theoretical
 
