@@ -3,6 +3,20 @@ Public exposure time calculator for the Magellan LLAMAS Integral Field Spectrogr
 
 Please review the supplied jupyter notebook LLAMAS_ETC_demo.ipynb for instructions on how to run the code.
 
+## Graphical interface (optional)
+
+If you prefer a GUI to the notebook, run the PyQt6 application:
+
+```bash
+pip install PyQt6        # one-time, if not already installed
+python etc_gui.py
+```
+
+It's a single window wrapping the same `observe_spectrum` engine: set the input spectrum (defaults to the
+bundled `SN1a_R20mag.fits`), exposure time, airmass, seeing, source type (point / extended surface
+brightness), aperture, PSF, throughput model, and channels; the embedded plot shows counts and SNR vs
+wavelength, and "Save results" writes a PNG + CSV.
+
 ## Throughput: as-measured (default) vs. theoretical
 
 As of the first on-sky calibration, the ETC **defaults to the as-measured instrument throughput** derived
