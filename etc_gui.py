@@ -57,6 +57,7 @@ class ETCWindow(QtWidgets.QMainWindow):
 
         self._load_spectrum(DEFAULT_SPECTRUM)
         self._on_source_changed()
+        self._on_norm_toggled()
         self.compute()
 
     # ---------------- UI ----------------
@@ -71,6 +72,17 @@ class ETCWindow(QtWidgets.QMainWindow):
         row.addWidget(self.path_edit); row.addWidget(browse)
         w = QtWidgets.QWidget(); w.setLayout(row)
         form.addRow('Input spectrum:', w)
+
+        # optional: rescale the loaded spectrum's SHAPE to a target AB magnitude at a pivot wavelength
+        self.norm_check = QtWidgets.QCheckBox('Normalize to AB magnitude')
+        self.norm_check.toggled.connect(self._on_norm_toggled)
+        form.addRow(self.norm_check)
+        self.norm_mag = QtWidgets.QDoubleSpinBox()
+        self.norm_mag.setRange(5.0, 35.0); self.norm_mag.setSingleStep(0.1); self.norm_mag.setValue(20.0)
+        form.addRow('   AB magnitude:', self.norm_mag)
+        self.norm_wave = QtWidgets.QDoubleSpinBox()
+        self.norm_wave.setRange(300.0, 1100.0); self.norm_wave.setValue(550.0); self.norm_wave.setSuffix(' nm')
+        form.addRow('   pivot wavelength:', self.norm_wave)
 
         self.texp = QtWidgets.QDoubleSpinBox()
         self.texp.setRange(1, 1e6); self.texp.setValue(1200); self.texp.setSuffix(' s')
@@ -167,6 +179,31 @@ class ETCWindow(QtWidgets.QMainWindow):
             self._models[key] = m
         return self._models[key]
 
+    def _on_norm_toggled(self):
+        on = self.norm_check.isChecked()
+        self.norm_mag.setEnabled(on); self.norm_wave.setEnabled(on)
+
+    def _normalized_flux(self):
+        """Return the input flux, optionally rescaled so its AB magnitude at the pivot wavelength equals
+        the requested value. f_nu = f_lambda * lambda^2 / c; m_AB = -2.5 log10(f_nu) - 48.60."""
+        if not self.norm_check.isChecked():
+            return self.flux
+        pivot_nm = self.norm_wave.value()
+        if pivot_nm < self.wave_nm.min() or pivot_nm > self.wave_nm.max():
+            self._log('normalize: pivot %.0f nm outside spectrum (%.0f-%.0f nm); using loaded flux'
+                      % (pivot_nm, self.wave_nm.min(), self.wave_nm.max()))
+            return self.flux
+        fl = float(np.interp(pivot_nm, self.wave_nm, self.flux))          # f_lambda at pivot [erg/s/cm2/A]
+        if not np.isfinite(fl) or fl <= 0:
+            self._log('normalize: flux at pivot <= 0; using loaded flux'); return self.flux
+        c_A = 2.99792458e18                                               # Angstrom / s
+        fnu = fl * (pivot_nm * 10.0) ** 2 / c_A                           # erg/s/cm2/Hz
+        m_current = -2.5 * np.log10(fnu) - 48.60
+        scale = 10.0 ** (-0.4 * (self.norm_mag.value() - m_current))
+        self._log('normalize: AB=%.2f at %.0f nm  (current AB=%.2f, scale x%.3g)'
+                  % (self.norm_mag.value(), pivot_nm, m_current, scale))
+        return self.flux * scale
+
     def compute(self):
         if self.wave_nm is None:
             self._log('no input spectrum loaded'); return
@@ -174,6 +211,7 @@ class ETCWindow(QtWidgets.QMainWindow):
         source = self.source.currentText(); mode = self.mode.currentText()
         ap_txt = self.aperture.currentText()
         aperture = ap_txt if ap_txt in ('optimal', 'single') else int(ap_txt)
+        flux = self._normalized_flux()
         self._results = {}
         self._log('--- compute (%s, %s throughput) ---' % (source, mode))
         for name, specname, deffile, _ in CHANNELS:
@@ -184,12 +222,12 @@ class ETCWindow(QtWidgets.QMainWindow):
             with contextlib.redirect_stdout(buf):
                 if source == 'point':
                     counts, noise = observe.observe_spectrum(
-                        model, texp, self.wave_nm, self.flux, airmass=airmass,
+                        model, texp, self.wave_nm, flux, airmass=airmass,
                         source='point', seeing=self.seeing.value(), aperture=aperture,
                         psf=self.psf.currentText())
                 else:
                     counts, noise = observe.observe_spectrum(
-                        model, texp, self.wave_nm, self.flux, airmass=airmass,
+                        model, texp, self.wave_nm, flux, airmass=airmass,
                         source='extended', nbin=self.nbin.value())
             self._results[name] = (model.waves, counts, noise)
             for line in buf.getvalue().strip().splitlines():
