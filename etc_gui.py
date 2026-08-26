@@ -10,7 +10,7 @@ Run from anywhere:
 
 Controls: input spectrum (defaults to the bundled SN1a_R20mag.fits), exposure time, airmass, seeing,
 source type (point / extended surface brightness), aperture, PSF, throughput mode, an optional moonlight
-sky background (lunar phase / separation / altitude), and which channels.
+sky background (lunar phase / separation / altitude), which channels, and a log-Y toggle.
 The embedded plot shows three stacked panels vs wavelength -- input spectrum, counts, and SNR;
 "Save results" writes a PNG + a CSV. The input can optionally be normalized to a target AB magnitude (point source) or surface-
 brightness flux density (extended source) at a chosen pivot wavelength.
@@ -141,6 +141,10 @@ class ETCWindow(QtWidgets.QMainWindow):
             self.ch_boxes[name] = cb; chrow.addWidget(cb)
         cw = QtWidgets.QWidget(); cw.setLayout(chrow)
         form.addRow('Channels:', cw)
+
+        self.logy = QtWidgets.QCheckBox('Log Y axis')     # useful when emission lines >> continuum
+        self.logy.toggled.connect(self._replot)           # just re-draws (no recompute)
+        form.addRow(self.logy)
 
         compute = QtWidgets.QPushButton('Compute')
         compute.clicked.connect(self.compute)
@@ -308,6 +312,9 @@ class ETCWindow(QtWidgets.QMainWindow):
             self.ax_counts.legend(fontsize=8)
             allw = np.concatenate([self._results[n][0] for n in self._results])
             self.ax_snr.set_xlim(float(np.nanmin(allw)), float(np.nanmax(allw)))   # focus on channel coverage
+        yscale = 'log' if self.logy.isChecked() else 'linear'
+        for ax in (self.ax_input, self.ax_counts, self.ax_snr):
+            ax.set_yscale(yscale)                          # log helps when emission lines dominate
         self.fig.tight_layout()
         self.canvas.draw()
 
