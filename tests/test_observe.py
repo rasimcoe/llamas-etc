@@ -66,6 +66,35 @@ def test_higher_airmass_lower_counts():
     assert _med(c2) < _med(c1)
 
 
+def test_full_moon_raises_sky_noise():
+    g, wv, fl = _setup()
+    _, n_dark = observe.observe_spectrum(g, 1200, wv, fl, airmass=1.2, seeing=0.8)
+    _, n_moon = observe.observe_spectrum(g, 1200, wv, fl, airmass=1.2, seeing=0.8,
+                                         moon_illum=1.0, moon_sep=60, moon_alt=60)
+    assert _med(n_moon) > _med(n_dark)                   # bright moon brightens the sky
+
+
+def test_moon_below_horizon_equals_dark():
+    g, wv, fl = _setup()
+    _, n_dark = observe.observe_spectrum(g, 1200, wv, fl, airmass=1.2, seeing=0.8)
+    _, n_down = observe.observe_spectrum(g, 1200, wv, fl, airmass=1.2, seeing=0.8,
+                                         moon_illum=1.0, moon_sep=60, moon_alt=-5)
+    assert np.allclose(n_down, n_dark)                   # moon below the horizon adds nothing
+
+
+def test_moon_color_matches_eso():
+    # ESO SkyCalc scattered-moonlight colour: bluer than red, but far flatter than lambda^-4 (~19)
+    m = observe.moon_sky_radiance(np.array([400.0, 800.0]), 1.0, 60, 60, 1.2, 0.12)
+    assert m[0] > m[1]                                   # bluer than the red
+    assert 3.0 < m[0] / m[1] < 6.0                       # ESO ~4.3 at sep 60 deg (not ~19 for lambda^-4)
+
+
+def test_moon_color_grayer_near_moon():
+    near = observe.moon_sky_radiance(np.array([400.0, 800.0]), 1.0, 20, 60, 1.2, 0.12)
+    far = observe.moon_sky_radiance(np.array([400.0, 800.0]), 1.0, 90, 40, 1.4, 0.12)
+    assert (near[0] / near[1]) < (far[0] / far[1])       # colour is greyer close to the moon
+
+
 if __name__ == '__main__':
     fns = [v for k, v in sorted(globals().items()) if k.startswith('test_')]
     for fn in fns:

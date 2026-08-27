@@ -24,9 +24,75 @@ def aperture_radius(nfib, Afib):
     return np.sqrt(nfib * Afib / np.pi)
 
 
+_MOON_COLOR = None
+
+
+def _moon_color_shape(waves_nm, sep_deg):
+    """ESO SkyCalc scattered-moonlight colour (``flux_sml`` normalised to 1.0 at 550 nm) interpolated to
+    the requested moon-target separation and wavelengths, from the bundled grid
+    COATINGS/eso_moon_color.npz. Falls back to a flat (grey) spectrum if the grid is missing."""
+    global _MOON_COLOR
+    if _MOON_COLOR is None:
+        p = 'COATINGS/eso_moon_color.npz'
+        p = p if os.path.isfile(p) else os.environ.get('COATINGS_PATH', './COATINGS/') + 'eso_moon_color.npz'
+        try:
+            d = np.load(p)
+            _MOON_COLOR = (np.asarray(d['wave_nm'], float), np.asarray(d['sep_deg'], float),
+                           np.asarray(d['color'], float))
+        except Exception:
+            _MOON_COLOR = False
+    if not _MOON_COLOR:
+        return np.ones_like(np.asarray(waves_nm, float))
+    gw, gs, gc = _MOON_COLOR
+    s = float(np.clip(sep_deg, gs.min(), gs.max()))
+    j = int(np.clip(np.searchsorted(gs, s) - 1, 0, len(gs) - 2))
+    w = (s - gs[j]) / (gs[j + 1] - gs[j]) if gs[j + 1] != gs[j] else 0.0
+    col = (1.0 - w) * gc[j] + w * gc[j + 1]                       # colour at this separation (grid wave grid)
+    return np.interp(waves_nm, gw, col, left=col[0], right=col[-1])
+
+
+def moon_sky_radiance(waves_nm, illum, sep_deg, alt_deg, airmass, k_V):
+    """Scattered-moonlight sky background as an ADDED photon radiance [photons/m2/s/micron/arcsec2] on
+    ``waves_nm``. Zero for a new moon or a moon below the horizon.
+
+        illum   : lunar illuminated fraction, 0 (new) .. 1 (full).
+        sep_deg : moon-target angular separation [deg].
+        alt_deg : moon altitude [deg].
+        airmass : target airmass (sec z).
+        k_V     : V-band atmospheric extinction [mag/airmass].
+
+    The V-band brightness LEVEL follows Krisciunas & Schaefer (1991); the spectral COLOUR is taken from
+    the ESO SkyCalc sky model (Jones et al. 2013 scattered moonlight; bundled grid
+    COATINGS/eso_moon_color.npz), interpolated by moon-target separation and normalised at 550 nm. The
+    ESO colour is far less steeply blue than a single-scattering Rayleigh law -- important for the LLAMAS
+    blue channel. (Separation dominates the colour; phase and airmass are second-order.)"""
+    waves_nm = np.asarray(waves_nm, float)
+    if illum is None or alt_deg is None or alt_deg <= 0.0:
+        return np.zeros_like(waves_nm)
+    illum = min(max(float(illum), 0.0), 1.0)
+    alpha = np.degrees(np.arccos(2.0 * illum - 1.0))              # phase angle: 0=full, 180=new [deg]
+    m_moon = -12.73 + 0.026 * alpha + 4.0e-9 * alpha ** 4         # KS91 moon V magnitude
+    I_star = 10.0 ** (-0.4 * (m_moon + 16.57))                   # lunar illuminance
+    f_rho = 10.0 ** 5.36 * (1.06 + np.cos(np.radians(sep_deg)) ** 2) + 10.0 ** (6.15 - sep_deg / 40.0)
+    s = np.sin(np.radians(90.0 - alt_deg))
+    X_moon = (1.0 - 0.96 * s * s) ** (-0.5)                      # KS91 airmass at the moon
+    B_moon = f_rho * I_star * 10.0 ** (-0.4 * k_V * X_moon) * (1.0 - 10.0 ** (-0.4 * k_V * airmass))  # nanoLamberts
+    if not np.isfinite(B_moon) or B_moon <= 0.0:
+        return np.zeros_like(waves_nm)
+    mu_V = (20.7233 - np.log(B_moon / 34.08)) / 0.92104          # V surface brightness [mag/arcsec2] (KS91)
+    shape = _moon_color_shape(waves_nm, sep_deg)                 # ESO SkyCalc PHOTON colour, = 1.0 at 550 nm
+    h = 6.62607e-27; c = 2.99792e10                              # erg s ; cm/s
+    # KS91 level -> V PHOTON radiance in the ETC's sky units [photons/m2/s/micron/arcsec2] (f_lambda V
+    # zeropoint / photon energy at 550 nm), then apply the ESO photon colour. flux_sml is already photon
+    # radiance, so there is NO further f_lambda->photon (x lambda) conversion.
+    R_V = 3.631e-9 * 10.0 ** (-0.4 * mu_V) * (550.0e-7) / (h * c) * 1.0e8
+    return R_V * shape
+
+
 def observe_spectrum(instrument, texp, input_wv, input_spec, airmass=None,
                      source='point', seeing=None, aperture='optimal', psf='moffat', beta=2.5,
-                     nbin=1, skyfile="eso_newmoon_radiance.txt", extfile="lco_extinction.txt"):
+                     nbin=1, moon_illum=None, moon_sep=90.0, moon_alt=45.0,
+                     skyfile="eso_newmoon_radiance.txt", extfile="lco_extinction.txt"):
     """Simulate a LLAMAS observation; return (counts, noise) in e- on the channel's wavelength grid.
 
     source='point' (default): ``input_spec`` is flux density f_lambda [erg/cm2/s/A]. The fraction of the
@@ -39,6 +105,10 @@ def observe_spectrum(instrument, texp, input_wv, input_spec, airmass=None,
 
     source='extended': ``input_spec`` is surface brightness [erg/cm2/s/A/arcsec2]; per-fibre signal =
         SB * fibre area, with no aperture loss. ``nbin`` co-adds nbin fibres (SNR improves as sqrt(nbin)).
+
+    Moonlight (optional): pass ``moon_illum`` (illuminated fraction 0..1) to add a scattered-moonlight sky
+        background (Krisciunas & Schaefer 1991) on top of the dark sky. ``moon_sep`` = moon-target
+        separation [deg], ``moon_alt`` = moon altitude [deg]. Default (moon_illum=None) is the dark sky.
     """
     # --- airmass / atmospheric extinction (v1.0) ---
     if airmass is None:
@@ -77,6 +147,19 @@ def observe_spectrum(instrument, texp, input_wv, input_spec, airmass=None,
     except Exception as e:
         print("   extinction file unavailable (" + str(e) + "); NOT applying atmospheric extinction")
         atm = np.ones_like(instrument.waves)
+
+    # Optional scattered-moonlight background (Krisciunas & Schaefer 1991), added to the dark sky.
+    if moon_illum is not None:
+        try:
+            k_V = float(np.interp(550.0, ke['wave_nm'], ke['k']))
+        except Exception:
+            k_V = 0.12
+        moon = moon_sky_radiance(instrument.waves, moon_illum, moon_sep, moon_alt, airmass, k_V)
+        sky = sky + moon
+        tag = ('below horizon/new -> no added background' if not np.any(moon > 0)
+               else 'added (bluer than dark sky)')
+        print("   moon: illum={:.2f}, sep={:.0f} deg, alt={:.0f} deg -> {}"
+              .format(min(max(moon_illum, 0.0), 1.0), moon_sep, moon_alt, tag))
 
     # Sky electrons in ONE fibre (per resolution element). See v1.0 notes on the (waves/1e3)/R bandwidth.
     sky_perfib = sky * magellan.Atel / (100 ** 2) * texp * (instrument.waves / 1.0e3) / instrument.R * \
